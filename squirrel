@@ -15,10 +15,13 @@
 # seq 9 | \
 #
 #	# cut out 3 lines      # sends them in a command    # sqiirrel result into blue
-#	sqh 3                  2> >(piper . blue            | sqp blue) | \
+#	sqh 3                  3> >(piper . blue            | sqp blue) | \
 #	
-#	# cut out 2 i+ 2 lines # sends them in a command    # squirrel result into green   # send them in command    # squirrel into yellow 
+#	# cut out 2 + 2 lines # sends them in a command    # squirrel result into green   # send them in command    # squirrel into yellow 
 #	sqhn 2 2               3> >(piper . green           | sqp green)                   4> >(piper . yellow       | sqp yellow) | \
+#	
+#	# create a local file
+#	{ echo stuff in local file >local_file ; cat ; } | \
 #	
 #	# get what's left from the sequence and process it
 #	piper . red | \
@@ -27,26 +30,39 @@
 #	#   <-->   stdin  file          <------>  <---> 
 #	sqc blue   -      :local_file    yellow   green
 #
-# without comments
-#
-# seq 9 | \
-#	sqh 3 3> >(piper . blue  | sqp xxx) | \
-#	sqhn 2 2 3> >(piper . green | sqp green) 4> >(piper . yellow | sqp yellow) | \
-#	piper . red | \
-#	sqc blue - :local_file green yellow
+# as we use named pipes, we need to make sure we don't access the same named pipe in different 
+# processes
+#	sqr # cleanup temporary pipes
+#	sqn "argument" place temporary pipes in "argument" directory
+
+squirrel_test()
+{
+sqr
+
+seq 9 | \
+	sqh 3 3> >(piper . blue  | sqp blue) | \
+	sqhn 2 2 3> >(piper . green | sqp green) 4> >(piper . yellow | sqp yellow) | \
+	{ echo stuff in local file >local_file ; cat ; } | \
+	piper . red | \
+	sqc blue - :local_file green yellow
+}
+
+# chose a nut
+sqn() { export _SQUIRREL_NUT="${1:-$RANDOM$RANDOM}" ; }
 
 # reset the cache
-sqr() { stmp=/tmp/$USER/stmp/$$ ; rm -rf "$stmp" ; }
+sqr() { stmp="/tmp/$USER/stmp/$$_${_SQUIRREL_NUT}" ; rm -rf "$stmp" ; }
 
 # lookup name to file
-sqf() { stmp=/tmp/$USER/stmp/$$ ; mkdir -p "$stmp" ; printf "$stmp/%s\n" "$@" ; }
+sqf() { stmp="/tmp/$USER/stmp/$$_${_SQUIRREL_NUT}" ; mkdir -p "$stmp" ; printf "$stmp/%s\n" "$1" ; }
 
 # any command that splits data into 2 or more chunks
 # leave fd 2 for errors and use as many fd as you want
 
-# cuts a lines from beginning of input
+# cuts lines from beginning of input
 sqh() { tee >(head -$1 1>&3) | tail +$(($1 + 1)) ; }
 
+# cuts multiple lines from beginning of input
 sqhn() { perl -e '$of=2 ; for (@ARGV) { $of++ ; open $fh, ">&=", $of ; print $fh scalar<STDIN> for (1.. $_) ; } print <STDIN>' "$@"  ; }
 
 # squirrel away your data in the cache
@@ -57,8 +73,7 @@ sqc()
 {
 
 for i in "$@" ; do
-	[[ "$i" == "-" ]] \
-		&& cat || \
+	[[ "$i" == "-" ]] && cat || \
 		{
 		[[ "$i" =~ ^: ]] \
 			&& cat "${i:1}" || \
@@ -69,6 +84,7 @@ for i in "$@" ; do
 				while IFS= read -r fname ; do
 					[[ -s "$f" ]] && cat "$f" && break
 				done < <(inotifywait -m -q $(dirname "$f"))
+			echo sqc: $f
 			}
 		}
 done
